@@ -1,13 +1,23 @@
 import streamlit as st
+import os
+import zipfile
+
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 
-import os
+# Unzip the FAISS index if not already unzipped
+if not os.path.exists("process_safety_index"):
+    with zipfile.ZipFile("process_safety_index.zip", "r") as zip_ref:
+        zip_ref.extractall(".")
 
-# Load FAISS vector index
-vector_db = FAISS.load_local("process_safety_index", OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY")))
+# Load the FAISS vector index
+vector_db = FAISS.load_local(
+    "process_safety_index",
+    OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
+)
+
 
 # Set up custom prompt
 custom_prompt = """
