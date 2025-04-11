@@ -1,37 +1,47 @@
 import streamlit as st
 import os
-import zipfile
-
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 
-# Unzip the FAISS index if needed
-if not os.path.exists("process_safety_index"):
-    import zipfile
-    with zipfile.ZipFile("process_safety_index.zip", "r") as zip_ref:
-        zip_ref.extractall(".")
+# Load PDFs from the pdfs/ folder
+def load_documents():
+    docs = []
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    for filename in os.listdir("pdfs"):
+        if filename.endswith(".pdf"):
+            loader = PyPDFLoader(os.path.join("pdfs", filename))
+            raw_pages = loader.load()
+            for doc in raw_pages:
+                chunks = splitter.split_documents([doc])
+                for i, chunk in enumerate(chunks):
+                    chunk.metadata.update({
+                        "source": filename,
+                        "page_number": doc.metadata.get("page", 1),
+                        "chunk_index": i
+                    })
+                    docs.append(chunk)
+    return docs
 
-# Dynamically search for folder containing 'index.faiss'
-def find_faiss_index_folder(root_dir="."):
-    for root, dirs, files in os.walk(root_dir):
-        if "index.faiss" in files and "index.pkl" in files:
-            return root
-    raise ValueError("❌ Could not find FAISS index files after unzipping.")
+# Load and embed documents
+@st.cache_resource(show_spinner=True)
+def embed_documents():
+    docs = load_documents()
+    embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
+    return FAISS.from_documents(docs, embeddings)
 
-# Detect the correct folder
-faiss_folder = find_faiss_index_folder()
+# Initialize vector DB
+st.title("🧠 Process Safety Assistant")
+st.markdown("Ask about any standard or procedure you've uploaded.")
+st.divider()
 
-# Load vector DB
-vector_db = FAISS.load_local(
-    faiss_folder,
-    OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
-)
-
+vector_db = embed_documents()
 
 # Set up custom prompt
-custom_prompt = """
+template = """
 You are a Process Safety Assistant helping users understand complex EHS and Process Safety Standards.
 
 Users may use informal, incorrect, or alternative terms. Your job is to:
@@ -42,38 +52,23 @@ Question: {question}
 Answer:
 """
 
-prompt_template = PromptTemplate(input_variables=["question"], template=custom_prompt)
+prompt = PromptTemplate(input_variables=["question"], template=template)
 llm = ChatOpenAI(openai_api_key=os.getenv("OPENAI_API_KEY"), temperature=0.2)
-llm_chain = LLMChain(llm=llm, prompt=prompt_template)
+llm_chain = LLMChain(llm=llm, prompt=prompt)
 
-# Define query function
-def ask_with_sources(question: str):
-    docs = vector_db.similarity_search(question, k=5)
-    answer = llm_chain.run({"question": question})
-
-    links = []
-    for doc in docs:
-        source = doc.metadata.get("source", "Unknown")
-        page = doc.metadata.get("page_number", 1)
-        chunk = doc.metadata.get("chunk_index", 0)
-        link = f"https://your-company.com/viewer?file={source}&page={page}&highlight=chunk_{chunk}"
-        links.append(f"{source} (Page {page}) → [Link]({link})")
-
-    return answer, links
-
-# Streamlit UI
-st.set_page_config(page_title="Process Safety Assistant", layout="centered")
-st.title("🧠 Process Safety Assistant")
-st.markdown("Ask anything about Process Safety and get standards-based answers.")
-
-user_input = st.text_input("Ask a question (in any language):")
+# Chat UI
+user_input = st.text_input("Ask a question about Process Safety:")
 
 if user_input:
-    answer, links = ask_with_sources(user_input)
+    with st.spinner("Searching your documents..."):
+        answer = llm_chain.run({"question": user_input})
+        sources = vector_db.similarity_search(user_input, k=3)
 
     st.markdown("### 💬 Answer")
     st.write(answer)
 
     st.markdown("### 📎 Sources")
-    for link in links:
-        st.markdown(f"- {link}")
+    for src in sources:
+        page = src.metadata.get("page_number", 1)
+        file = src.metadata.get("source", "PDF")
+        st.markdown(f"- {file} (Page {page})")
