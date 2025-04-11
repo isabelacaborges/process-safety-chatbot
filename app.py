@@ -7,27 +7,28 @@ from langchain.chains import LLMChain
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 
-# Unzip the FAISS index if not already unzipped
+# Unzip the FAISS index if needed
 if not os.path.exists("process_safety_index"):
+    import zipfile
     with zipfile.ZipFile("process_safety_index.zip", "r") as zip_ref:
         zip_ref.extractall(".")
 
-# Try to find correct subfolder inside extracted zip
-faiss_folder = "process_safety_index"
-if not os.path.exists(os.path.join(faiss_folder, "index.faiss")):
-    # If the files are nested one level deeper, fix the path
-    possible_subdirs = os.listdir(faiss_folder)
-    for sub in possible_subdirs:
-        sub_path = os.path.join(faiss_folder, sub)
-        if os.path.isdir(sub_path) and os.path.exists(os.path.join(sub_path, "index.faiss")):
-            faiss_folder = sub_path
-            break
+# Dynamically search for folder containing 'index.faiss'
+def find_faiss_index_folder(root_dir="."):
+    for root, dirs, files in os.walk(root_dir):
+        if "index.faiss" in files and "index.pkl" in files:
+            return root
+    raise ValueError("❌ Could not find FAISS index files after unzipping.")
 
-# Load the FAISS vector index from correct folder
+# Detect the correct folder
+faiss_folder = find_faiss_index_folder()
+
+# Load vector DB
 vector_db = FAISS.load_local(
     faiss_folder,
     OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
 )
+
 
 # Set up custom prompt
 custom_prompt = """
