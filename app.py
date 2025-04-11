@@ -48,6 +48,14 @@ Users may use informal, incorrect, or alternative terms. Your job is to:
 - Understand the **intent** behind the question
 - Match them to correct safety concepts from the documents
 
+Your goal is to answer the user's question using only the information contained in the documents provided to you. Do not guess. Do not add any outside knowledge.
+
+Instructions:
+- Do not make up answers.
+- If the information is not in the documents, say: "I'm sorry, I couldn't find that information in the documents."
+- Provide a clear and concise answer, based only on the content from the documents.
+- If helpful, include the source PDF file and page number in your response.
+
 Question: {question}
 Answer:
 """
